@@ -1,0 +1,6 @@
+node_modules/
+.env
+db/cojep.db
+db/cojep.db-shm
+db/cojep.db-wal
+npm-debug.log*

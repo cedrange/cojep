@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tableau de bord — Inscriptions Café Politique</title>
+<link rel="icon" type="image/png" href="/assets/vector.png" />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/admin/admin.css" />
+</head>
+<body class="admin-dash-body">
+
+<header class="admin-header">
+  <div class="admin-header-inner">
+    <div class="admin-brand">
+      <img src="/assets/vector.png" alt="Logo COJEP" />
+      <span>COJEP · Admin</span>
+    </div>
+    <button id="logoutBtn" class="btn-logout">Déconnexion</button>
+  </div>
+</header>
+
+<main class="admin-main">
+  <h1>Inscriptions — Café Politique du 31 octobre</h1>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <span class="stat-value" id="statCount">–</span>
+      <span class="stat-label">Inscriptions</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value" id="statPersonnes">–</span>
+      <span class="stat-label">Personnes attendues</span>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="searchInput" placeholder="Rechercher par nom, prénom, email, téléphone..." />
+    <a href="/admin/api/registrations/export.csv" class="btn-export">Exporter en CSV</a>
+  </div>
+
+  <div class="table-wrap">
+    <table id="regTable">
+      <thead>
+        <tr>
+          <th>Prénom</th>
+          <th>Nom</th>
+          <th>Email</th>
+          <th>Téléphone</th>
+          <th>Pers.</th>
+          <th>Message</th>
+          <th>Email envoyé</th>
+          <th>Inscrit le</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="regTableBody">
+        <tr><td colspan="9" class="empty-row">Chargement...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/admin/admin.js"></script>
+</body>
+</html>
