@@ -1,0 +1,12 @@
+{
+    "name": "cojep/cafe-politique",
+    "description": "Landing page et gestion des inscriptions pour le Café Politique du COJEP - 31 octobre",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "config": {
+        "vendor-dir": "vendor"
+    }
+}

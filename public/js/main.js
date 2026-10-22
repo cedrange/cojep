@@ -51,7 +51,7 @@
     submitBtn.querySelector('.btn-label').textContent = 'Envoi en cours...';
 
     try {
-      const res = await fetch('/api/register', {
+      const res = await fetch('register.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

@@ -195,3 +195,91 @@ tbody tr:hover { background: #fafbff; }
 @media (max-width: 640px) {
   .admin-main { padding: 24px 16px 48px; }
 }
+
+/* ---- Flash ---- */
+.flash {
+  padding: 12px 18px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.flash-success { background: #e3f8ea; color: #12723c; }
+.flash-error { background: #fdeef5; color: #a3124f; }
+.flash-info { background: #eaf0ff; color: #1e3fd6; }
+
+/* ---- Rappel ---- */
+.reminder-panel {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  background: #fff;
+  border-radius: 14px;
+  padding: 22px 26px;
+  margin-bottom: 24px;
+  box-shadow: 0 8px 24px rgba(11,22,80,0.08);
+  border-left: 4px solid var(--magenta);
+}
+.reminder-intro { flex: 1 1 320px; }
+.reminder-intro h2 { font-family: 'Poppins', sans-serif; font-size: 1.05rem; color: var(--navy); margin: 0 0 6px; }
+.reminder-intro p { margin: 0 0 8px; color: var(--muted); font-size: 0.86rem; line-height: 1.5; }
+.reminder-link { color: var(--blue); font-weight: 600; font-size: 0.86rem; text-decoration: none; }
+.reminder-link:hover { text-decoration: underline; }
+
+.reminder-actions { display: flex; flex-direction: column; gap: 10px; flex: 0 1 380px; }
+.reminder-test { display: flex; gap: 8px; }
+.reminder-test input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #dcdfea;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+.reminder-test input:focus { outline: none; border-color: var(--violet); }
+
+.btn-secondary {
+  background: #fff;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.btn-secondary:hover { background: #f0f3ff; }
+
+.btn-reminder {
+  width: 100%;
+  border: none;
+  background: linear-gradient(120deg, var(--magenta), var(--pink));
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-reminder:disabled { background: #d9dbe6; color: var(--muted); cursor: not-allowed; }
+
+.row-actions { white-space: nowrap; }
+.row-actions form { display: inline-block; margin-right: 6px; }
+.btn-remind-row {
+  background: none;
+  border: 1px solid #c9d3fb;
+  color: var(--blue);
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn-remind-row:hover { background: #f0f3ff; }
