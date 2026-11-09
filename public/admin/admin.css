@@ -283,3 +283,18 @@ tbody tr:hover { background: #fafbff; }
   white-space: nowrap;
 }
 .btn-remind-row:hover { background: #f0f3ff; }
+.flash-log { margin-top: 10px; font-weight: 400; }
+.flash-log summary { cursor: pointer; font-weight: 600; }
+.flash-log pre {
+  margin: 8px 0 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: rgba(255,255,255,0.7);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.reminder-panel-thanks { border-left-color: #1877f2; }

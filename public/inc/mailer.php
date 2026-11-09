@@ -8,7 +8,7 @@ require_once __DIR__ . '/../vendor/phpmailer/phpmailer/src/SMTP.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
-// Signataire du mail de rappel (utilisé aussi comme adresse de réponse).
+// Signataire du mail de rappel.
 const COJEP_REMINDER_SIGNATURE = [
     'nom' => 'Angaman Ange Cedrick',
     'poste' => 'PCO et Président des Jeunes du COJEP en Belgique',
@@ -17,6 +17,7 @@ const COJEP_REMINDER_SIGNATURE = [
 ];
 
 const COJEP_EVENT_DATE = '2026-10-31 14:00:00';
+const COJEP_FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=100083171671641';
 const COJEP_EVENT_PLACE = 'NH Brussels Carrefour de l\'Europe';
 const COJEP_EVENT_ADDRESS = 'Rue du Marché aux Herbes 110, 1000 Bruxelles';
 
@@ -42,6 +43,8 @@ function cojep_create_mailer(): ?PHPMailer
         $mail->SMTPSecure = $smtp['secure'];
     }
     $mail->CharSet = 'UTF-8';
+    // L'en-tête "X-Mailer: PHPMailer" est pénalisé par les filtres anti-spam (AUTOGEN_PHP_SPAMMY).
+    $mail->XMailer = ' ';
 
     // Le certificat TLS du mutualisé LWS est émis pour *.lwspanel.com, pas pour le nom
     // d'hôte du domaine client (ex: mail.cojep.be) : on assouplit la vérification du nom
@@ -144,29 +147,75 @@ function cojep_reminder_subject(): string
 }
 
 /**
- * Envoie le rappel à une liste d'inscrits en réutilisant une seule connexion SMTP.
- * $onSent est appelé après chaque envoi réussi (pour marquer l'inscription en base au fil de l'eau).
- *
- * @return array{sent:int, failed:string[], error:?string}
+ * Campagnes envoyables depuis le dashboard : colonne de suivi en base et fonctions de rendu.
  */
-function cojep_send_reminder_emails(array $registrations, string $siteUrl, ?callable $onSent = null): array
+function cojep_campaign(string $key): ?array
 {
-    $result = ['sent' => 0, 'failed' => [], 'error' => null];
+    $campaigns = [
+        'rappel' => [
+            'column' => 'rappel_envoye_at',
+            'label' => 'rappel',
+            'subject' => 'cojep_reminder_subject',
+            'html' => 'cojep_reminder_email_html',
+            'text' => 'cojep_reminder_email_text',
+        ],
+        'merci' => [
+            'column' => 'merci_envoye_at',
+            'label' => 'remerciement',
+            'subject' => 'cojep_thanks_subject',
+            'html' => 'cojep_thanks_email_html',
+            'text' => 'cojep_thanks_email_text',
+        ],
+    ];
 
-    $mail = cojep_create_mailer();
-    if ($mail === null) {
-        $result['error'] = 'SMTP non configuré (config.php) : aucun rappel envoyé.';
+    return $campaigns[$key] ?? null;
+}
+
+/**
+ * Envoie une campagne à une liste d'inscrits en réutilisant une seule connexion SMTP.
+ * $onSent est appelé après chaque envoi réussi (pour marquer l'inscription en base au fil de l'eau).
+ * Avec $captureLog, les réponses du serveur SMTP sont renvoyées dans 'log' (diagnostic du mail de test).
+ *
+ * @return array{sent:int, failed:string[], error:?string, log:string[]}
+ */
+function cojep_send_campaign_emails(string $campaignKey, array $registrations, string $siteUrl, ?callable $onSent = null, bool $captureLog = false): array
+{
+    $result = ['sent' => 0, 'failed' => [], 'error' => null, 'log' => []];
+
+    $campaign = cojep_campaign($campaignKey);
+    if ($campaign === null) {
+        $result['error'] = 'Campagne inconnue.';
         return $result;
     }
 
-    $signature = COJEP_REMINDER_SIGNATURE;
+    $mail = cojep_create_mailer();
+    if ($mail === null) {
+        $result['error'] = 'SMTP non configuré (config.php) : aucun mail envoyé.';
+        return $result;
+    }
+
+    if ($captureLog) {
+        // Demande au serveur un accusé de livraison (envoyé à l'expéditeur) contenant la réponse du destinataire.
+        $mail->dsn = 'SUCCESS,FAILURE,DELAY';
+        $mail->SMTPDebug = 2;
+        // On ne garde que les réponses du serveur : les lignes du client contiennent l'AUTH (identifiants).
+        $mail->Debugoutput = function ($str) use (&$result) {
+            $line = trim($str);
+            if ($line !== '' && strpos($line, 'CLIENT -> SERVER') !== 0) {
+                $result['log'][] = $line;
+            }
+        };
+    }
+
+    // Pas de Reply-To vers une autre adresse (ex. Gmail) ni d'image jointe : Gmail écarte ces mails sinon.
+    // Le logo est chargé depuis le site, et les réponses arrivent sur l'adresse d'expédition.
+    $logoUrl = rtrim($siteUrl, '/') . '/assets/logo-email.png';
 
     try {
         $mail->SMTPKeepAlive = true;
-        $mail->addReplyTo($signature['email'], $signature['nom']);
-        $mail->addEmbeddedImage(__DIR__ . '/../assets/vector.png', 'cojep-logo', 'cojep.png');
+        $mail->addCustomHeader('List-Unsubscribe', '<mailto:' . $mail->From . '?subject=' . rawurlencode('Désinscription') . '>');
         $mail->isHTML(true);
-        $mail->Subject = cojep_reminder_subject();
+        $mail->Subject = ($campaign['subject'])();
     } catch (PHPMailerException $e) {
         $result['error'] = 'Préparation du mail impossible : ' . $e->getMessage();
         return $result;
@@ -176,8 +225,8 @@ function cojep_send_reminder_emails(array $registrations, string $siteUrl, ?call
         try {
             $mail->clearAddresses();
             $mail->addAddress($registration['email'], trim($registration['prenom'] . ' ' . $registration['nom']));
-            $mail->Body = cojep_reminder_email_html($registration, $siteUrl, 'cid:cojep-logo');
-            $mail->AltBody = cojep_reminder_email_text($registration, $siteUrl);
+            $mail->Body = ($campaign['html'])($registration, $siteUrl, $logoUrl);
+            $mail->AltBody = ($campaign['text'])($registration, $siteUrl);
             $mail->send();
 
             $result['sent']++;
@@ -185,8 +234,11 @@ function cojep_send_reminder_emails(array $registrations, string $siteUrl, ?call
                 $onSent($registration);
             }
         } catch (PHPMailerException $e) {
-            error_log('[mailer] échec envoi rappel à ' . $registration['email'] . ' : ' . $mail->ErrorInfo);
+            error_log('[mailer] échec envoi ' . $campaign['label'] . ' à ' . $registration['email'] . ' : ' . $mail->ErrorInfo);
             $result['failed'][] = $registration['email'];
+            if ($captureLog) {
+                $result['log'][] = 'ERREUR : ' . $mail->ErrorInfo;
+            }
             // Une erreur SMTP peut laisser la connexion dans un état incohérent : on repart proprement.
             $mail->getSMTPInstance()->reset();
         }
@@ -213,6 +265,110 @@ function cojep_event_links(): array
     ];
 }
 
+/**
+ * Gabarit commun des mails COJEP (logo, bandeau, signature, pied de page).
+ * 'heading' et 'content' sont du HTML déjà échappé ; les autres valeurs sont du texte brut.
+ */
+function cojep_email_layout(array $p): string
+{
+    $e = 'cojep_escape_html';
+    $title = $e($p['title']);
+    $preheader = $e($p['preheader']);
+    $logo = $e($p['logo']);
+    $badge = $e($p['badge']);
+    $heading = $p['heading'];
+    $content = $p['content'];
+    $closing = $e($p['closing']);
+    $footerNote = $e($p['footer_note'] ?? 'Vous recevez ce message car vous êtes inscrit(e) à cet événement.');
+
+    $sig = COJEP_REMINDER_SIGNATURE;
+    $sigNom = $e($sig['nom']);
+    $sigPoste = $e($sig['poste']);
+    $sigEmail = $e($sig['email']);
+    $sigTelHref = $e(preg_replace('/[^+\d]/', '', $sig['telephone']));
+    $sigTelLabel = $e(preg_replace('/^\+32(\d{3})(\d{2})(\d{2})(\d{2})$/', '+32 $1 $2 $3 $4', $sig['telephone']));
+
+    return <<<HTML
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="light" />
+<title>{$title}</title>
+<style>
+  @media only screen and (max-width: 620px) {
+    .px { padding-left: 22px !important; padding-right: 22px !important; }
+    .hero-title { font-size: 25px !important; }
+    .stack { display: block !important; width: 100% !important; text-align: center !important; }
+    .stack a { display: block !important; }
+    .gap { display: block !important; width: 100% !important; height: 10px !important; line-height: 10px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#eef0f7;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#eef0f7;">{$preheader}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef0f7" style="background:#eef0f7;">
+  <tr>
+    <td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
+
+        <!-- Logo -->
+        <tr>
+          <td align="center" bgcolor="#ffffff" style="padding:28px 24px 18px;">
+            <img src="{$logo}" width="120" alt="COJEP" style="display:block;width:120px;max-width:120px;height:auto;border:0;" />
+            <p style="margin:10px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#1e3fd6;font-weight:bold;">Café Politique · Bruxelles</p>
+          </td>
+        </tr>
+
+        <!-- Bandeau -->
+        <tr>
+          <td align="center" bgcolor="#0b1650" style="background:#0b1650;background-image:linear-gradient(125deg,#0b1650 0%,#1e3fd6 45%,#6d28d9 75%,#d6247a 100%);padding:38px 32px 40px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td bgcolor="#d6247a" style="background:#d6247a;border-radius:999px;padding:6px 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#ffffff;">{$badge}</td>
+            </tr></table>
+            <h1 class="hero-title" style="margin:18px 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:30px;line-height:1.25;font-weight:bold;color:#ffffff;">{$heading}</h1>
+            <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#dfe3ff;font-style:italic;">« L'Afrique face à son histoire : exiger réparation pour bâtir l'avenir »</p>
+          </td>
+        </tr>
+
+{$content}
+        <!-- Signature -->
+        <tr>
+          <td class="px" style="padding:26px 40px 36px;">
+            <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1c1c28;">{$closing}</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td width="4" bgcolor="#d6247a" style="width:4px;background:#d6247a;border-radius:2px;">&nbsp;</td>
+              <td style="padding:2px 0 2px 16px;font-family:Arial,Helvetica,sans-serif;line-height:1.55;">
+                <p style="margin:0;font-size:16px;font-weight:bold;color:#0b1650;">{$sigNom}</p>
+                <p style="margin:0 0 6px;font-size:13px;color:#6d28d9;font-weight:bold;">{$sigPoste}</p>
+                <p style="margin:0;font-size:13px;color:#4b5068;">
+                  <a href="mailto:{$sigEmail}" style="color:#1e3fd6;text-decoration:none;">{$sigEmail}</a>
+                  &nbsp;·&nbsp;
+                  <a href="tel:{$sigTelHref}" style="color:#1e3fd6;text-decoration:none;">{$sigTelLabel}</a>
+                </p>
+              </td>
+            </tr></table>
+          </td>
+        </tr>
+
+        <!-- Pied -->
+        <tr>
+          <td align="center" bgcolor="#0b1650" style="background:#0b1650;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#aab1d9;">
+            <strong style="color:#ffffff;">COJEP</strong> · Café Politique du 31 octobre · Bruxelles<br />
+            {$footerNote}
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
+HTML;
+}
+
 function cojep_reminder_email_html(array $registration, string $siteUrl, string $logoSrc): string
 {
     $e = 'cojep_escape_html';
@@ -237,15 +393,7 @@ function cojep_reminder_email_html(array $registration, string $siteUrl, string 
     $calendar = $e($links['calendar']);
     $site = $e($siteUrl);
     $siteLabel = $e(preg_replace('#^https?://#', '', $siteUrl));
-    $logo = $e($logoSrc);
-
-    $sig = COJEP_REMINDER_SIGNATURE;
-    $sigNom = $e($sig['nom']);
-    $sigPoste = $e($sig['poste']);
-    $sigEmail = $e($sig['email']);
-    $sigTel = $e($sig['telephone']);
-    $sigTelHref = $e(preg_replace('/[^+\d]/', '', $sig['telephone']));
-    $sigTelLabel = $e(preg_replace('/^\+32(\d{3})(\d{2})(\d{2})(\d{2})$/', '+32 $1 $2 $3 $4', $sig['telephone']));
+    $photoSalle = $e(rtrim($siteUrl, '/') . '/assets/photo-salle-email.jpg');
 
     $place = $e(COJEP_EVENT_PLACE);
     $address = $e(COJEP_EVENT_ADDRESS);
@@ -276,50 +424,14 @@ function cojep_reminder_email_html(array $registration, string $siteUrl, string 
 HTML;
     }
 
-    return <<<HTML
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="color-scheme" content="light" />
-<title>Café Politique du COJEP — 31 octobre</title>
-<style>
-  @media only screen and (max-width: 620px) {
-    .px { padding-left: 22px !important; padding-right: 22px !important; }
-    .hero-title { font-size: 25px !important; }
-    .stack { display: block !important; width: 100% !important; text-align: center !important; }
-    .stack a { display: block !important; }
-    .gap { display: block !important; width: 100% !important; height: 10px !important; line-height: 10px !important; }
-  }
-</style>
-</head>
-<body style="margin:0;padding:0;background:#eef0f7;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#eef0f7;">{$preheader}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef0f7" style="background:#eef0f7;">
-  <tr>
-    <td align="center" style="padding:28px 12px;">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
-
-        <!-- Logo -->
-        <tr>
-          <td align="center" bgcolor="#ffffff" style="padding:28px 24px 18px;">
-            <img src="{$logo}" width="120" alt="COJEP" style="display:block;width:120px;max-width:120px;height:auto;border:0;" />
-            <p style="margin:10px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#1e3fd6;font-weight:bold;">Café Politique · Bruxelles</p>
-          </td>
-        </tr>
-
-        <!-- Bandeau -->
-        <tr>
-          <td align="center" bgcolor="#0b1650" style="background:#0b1650;background-image:linear-gradient(125deg,#0b1650 0%,#1e3fd6 45%,#6d28d9 75%,#d6247a 100%);padding:38px 32px 40px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td bgcolor="#d6247a" style="background:#d6247a;border-radius:999px;padding:6px 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#ffffff;">{$countdown}</td>
-            </tr></table>
-            <h1 class="hero-title" style="margin:18px 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:30px;line-height:1.25;font-weight:bold;color:#ffffff;">Le 31 octobre,<br />votre voix compte.</h1>
-            <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#dfe3ff;font-style:italic;">« L'Afrique face à son histoire : exiger réparation pour bâtir l'avenir »</p>
-          </td>
-        </tr>
-
+    return cojep_email_layout([
+        'title' => 'Café Politique du COJEP — 31 octobre',
+        'preheader' => $preheader,
+        'logo' => $logoSrc,
+        'badge' => $countdown,
+        'heading' => 'Le 31 octobre,<br />votre voix compte.',
+        'closing' => 'Avec toute ma détermination,',
+        'content' => <<<HTML
         <!-- Message -->
         <tr>
           <td class="px" style="padding:34px 40px 8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#1c1c28;">
@@ -343,6 +455,14 @@ HTML;
                 </td>
               </tr>
             </table>
+          </td>
+        </tr>
+
+        <!-- Photo de la salle -->
+        <tr>
+          <td class="px" style="padding:28px 40px 0;">
+            <img src="{$photoSalle}" width="520" alt="La salle de l'événement au {$place}" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:12px;" />
+            <p style="margin:8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#6b7080;text-align:center;font-style:italic;">La salle qui vous accueillera au {$place}</p>
           </td>
         </tr>
 
@@ -399,40 +519,8 @@ HTML;
           </td>
         </tr>
 
-        <!-- Signature -->
-        <tr>
-          <td class="px" style="padding:26px 40px 36px;">
-            <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1c1c28;">Avec toute ma détermination,</p>
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td width="4" bgcolor="#d6247a" style="width:4px;background:#d6247a;border-radius:2px;">&nbsp;</td>
-              <td style="padding:2px 0 2px 16px;font-family:Arial,Helvetica,sans-serif;line-height:1.55;">
-                <p style="margin:0;font-size:16px;font-weight:bold;color:#0b1650;">{$sigNom}</p>
-                <p style="margin:0 0 6px;font-size:13px;color:#6d28d9;font-weight:bold;">{$sigPoste}</p>
-                <p style="margin:0;font-size:13px;color:#4b5068;">
-                  <a href="mailto:{$sigEmail}" style="color:#1e3fd6;text-decoration:none;">{$sigEmail}</a>
-                  &nbsp;·&nbsp;
-                  <a href="tel:{$sigTelHref}" style="color:#1e3fd6;text-decoration:none;">{$sigTelLabel}</a>
-                </p>
-              </td>
-            </tr></table>
-          </td>
-        </tr>
-
-        <!-- Pied -->
-        <tr>
-          <td align="center" bgcolor="#0b1650" style="background:#0b1650;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#aab1d9;">
-            <strong style="color:#ffffff;">COJEP</strong> · Café Politique du 31 octobre · Bruxelles<br />
-            Vous recevez ce message car vous êtes inscrit(e) à cet événement.
-          </td>
-        </tr>
-
-      </table>
-    </td>
-  </tr>
-</table>
-</body>
-</html>
-HTML;
+HTML,
+    ]);
 }
 
 function cojep_reminder_email_text(array $registration, string $siteUrl): string
@@ -459,5 +547,97 @@ function cojep_reminder_email_text(array $registration, string $siteUrl): string
         . "Faites grandir le mouvement : partagez l'invitation ({$siteUrl}).\n"
         . "Un empêchement ? Répondez simplement à ce mail.\n\n"
         . "Le 31 octobre, soyons nombreux, soyons dignes, soyons debout.\n\n"
+        . "{$sig['nom']}\n{$sig['poste']}\n{$sig['email']} · {$sig['telephone']}\n";
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mail de remerciement (après l'événement)                          */
+/* ------------------------------------------------------------------ */
+
+function cojep_thanks_subject(): string
+{
+    return 'Merci pour le 31 octobre — retrouvez vos photos du Café Politique';
+}
+
+function cojep_thanks_email_html(array $registration, string $siteUrl, string $logoSrc): string
+{
+    $e = 'cojep_escape_html';
+    $prenom = $e($registration['prenom']);
+    $facebook = $e(COJEP_FACEBOOK_URL);
+    $photoSalle = $e(rtrim($siteUrl, '/') . '/assets/photo-salle-email.jpg');
+    $place = $e(COJEP_EVENT_PLACE);
+
+    return cojep_email_layout([
+        'title' => 'Merci — Café Politique du COJEP',
+        'preheader' => 'Merci pour le 31 octobre. Les photos du Café Politique sont en ligne sur notre page Facebook.',
+        'logo' => $logoSrc,
+        'badge' => 'Merci',
+        'heading' => 'Merci d\'avoir fait<br />vivre ce 31 octobre.',
+        'closing' => 'Avec toute ma gratitude,',
+        'content' => <<<HTML
+        <!-- Message -->
+        <tr>
+          <td class="px" style="padding:34px 40px 8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#1c1c28;">
+            <p style="margin:0 0 16px;">Bonjour {$prenom},</p>
+            <p style="margin:0 0 16px;">Au nom de toute l'équipe du COJEP, <strong>merci</strong>. Merci d'avoir répondu à l'appel du <strong>Café Politique du 31 octobre</strong> et d'avoir fait de cet après-midi aux côtés de <strong>Charles Blé Goudé</strong> un vrai moment d'échange, de vérité et de fraternité.</p>
+            <p style="margin:0 0 16px;">Vos questions, vos prises de parole et votre présence ont donné tout son sens au thème de la journée : <em>l'Afrique face à son histoire, exiger réparation pour bâtir l'avenir</em>. Ce débat est le nôtre, et vous l'avez porté avec force.</p>
+            <p style="margin:0 0 6px;">Si vous n'avez pas pu nous rejoindre, ce n'est que partie remise : les images de la journée vous attendent, et le prochain rendez-vous se prépare déjà.</p>
+          </td>
+        </tr>
+
+        <!-- Photos Facebook -->
+        <tr>
+          <td class="px" style="padding:24px 40px 6px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f4fd" style="background:#f6f4fd;border-radius:14px;">
+              <tr>
+                <td style="padding:0;">
+                  <a href="{$facebook}" target="_blank" style="text-decoration:none;">
+                    <img src="{$photoSalle}" width="520" alt="La salle du Café Politique au {$place}" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:14px 14px 0 0;" />
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="padding:24px 26px 28px;font-family:Arial,Helvetica,sans-serif;">
+                  <p style="margin:0 0 8px;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:bold;color:#6d28d9;">Vos photos sont en ligne</p>
+                  <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#1c1c28;">Retrouvez les photos de la journée sur la page Facebook du COJEP. Téléchargez-les, partagez-les et <strong>identifiez-vous</strong> pour faire connaître le mouvement autour de vous.</p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td class="stack" bgcolor="#1877f2" style="border-radius:10px;background:#1877f2;">
+                      <a href="{$facebook}" target="_blank" style="display:inline-block;padding:14px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:10px;">Voir les photos sur Facebook</a>
+                    </td>
+                  </tr></table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Suite -->
+        <tr>
+          <td class="px" style="padding:26px 40px 8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#1c1c28;">
+            <p style="margin:0 0 12px;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:bold;color:#6d28d9;">Et maintenant ?</p>
+            <p style="margin:0 0 16px;">Comme promis, ce rendez-vous ne s'arrête pas à la sortie de la salle. Les propositions issues des échanges seront portées par le COJEP, et nous vous tiendrons informé(e) des prochaines étapes.</p>
+            <p style="margin:0 0 16px;"><strong>Suivez notre page Facebook</strong> pour ne rien manquer de nos prochaines actions, et répondez à ce mail pour nous partager votre ressenti ou vos idées : chaque retour compte.</p>
+            <p style="margin:24px 0 0;font-family:Georgia,'Times New Roman',serif;font-size:18px;line-height:1.5;color:#0b1650;font-style:italic;">Ensemble, nous avons été nombreux, dignes et debout. Continuons.</p>
+          </td>
+        </tr>
+
+HTML,
+    ]);
+}
+
+function cojep_thanks_email_text(array $registration, string $siteUrl): string
+{
+    $sig = COJEP_REMINDER_SIGNATURE;
+
+    return "Bonjour {$registration['prenom']},\n\n"
+        . "Au nom de toute l'équipe du COJEP, merci d'avoir répondu à l'appel du Café Politique du 31 octobre, "
+        . "aux côtés de Charles Blé Goudé.\n\n"
+        . "VOS PHOTOS SONT EN LIGNE\n"
+        . "Retrouvez les photos de la journée sur la page Facebook du COJEP, téléchargez-les, partagez-les et identifiez-vous :\n"
+        . COJEP_FACEBOOK_URL . "\n\n"
+        . "ET MAINTENANT ?\n"
+        . "Les propositions issues des échanges seront portées par le COJEP, et nous vous tiendrons informé(e) des prochaines étapes. "
+        . "Répondez à ce mail pour nous partager votre ressenti ou vos idées.\n\n"
+        . "Ensemble, nous avons été nombreux, dignes et debout. Continuons.\n\n"
         . "{$sig['nom']}\n{$sig['poste']}\n{$sig['email']} · {$sig['telephone']}\n";
 }

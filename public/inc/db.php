@@ -25,7 +25,7 @@ function cojep_db(): PDO
 }
 
 /**
- * Ajoute la colonne de suivi des rappels si la base a été créée avant cette fonctionnalité.
+ * Ajoute les colonnes de suivi des mails (rappel, remerciement) si la base a été créée avant ces fonctionnalités.
  */
 function cojep_ensure_reminder_column(): void
 {
@@ -35,9 +35,15 @@ function cojep_ensure_reminder_column(): void
     }
 
     $pdo = cojep_db();
-    $exists = $pdo->query("SHOW COLUMNS FROM registrations LIKE 'rappel_envoye_at'")->fetch();
-    if (!$exists) {
-        $pdo->exec('ALTER TABLE registrations ADD COLUMN rappel_envoye_at DATETIME DEFAULT NULL AFTER email_envoye');
+    $columns = [
+        'rappel_envoye_at' => 'email_envoye',
+        'merci_envoye_at' => 'rappel_envoye_at',
+    ];
+    foreach ($columns as $column => $after) {
+        $exists = $pdo->query("SHOW COLUMNS FROM registrations LIKE '{$column}'")->fetch();
+        if (!$exists) {
+            $pdo->exec("ALTER TABLE registrations ADD COLUMN {$column} DATETIME DEFAULT NULL AFTER {$after}");
+        }
     }
 
     $checked = true;

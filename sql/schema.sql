@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS registrations (
   message VARCHAR(500) DEFAULT NULL,
   email_envoye TINYINT(1) NOT NULL DEFAULT 0,
   rappel_envoye_at DATETIME DEFAULT NULL,
+  merci_envoye_at DATETIME DEFAULT NULL,
   ip_address VARCHAR(45) DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_email (email)

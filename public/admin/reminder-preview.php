@@ -7,9 +7,11 @@ require_once __DIR__ . '/../inc/mailer.php';
 $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
 $siteUrl = ($isHttps ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
 
+$campaign = cojep_campaign((string) ($_GET['campaign'] ?? 'rappel')) ?? cojep_campaign('rappel');
+
 header('Content-Type: text/html; charset=utf-8');
-echo cojep_reminder_email_html(
+echo ($campaign['html'])(
     ['prenom' => 'Aminata', 'nom' => 'Exemple', 'email' => '', 'nombre_personnes' => 2],
     $siteUrl,
-    '/assets/vector.png'
+    '/assets/logo-email.png'
 );
